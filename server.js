@@ -1,13 +1,15 @@
 import dotenv from 'dotenv';
 import express from 'express';
 import pool from './config/db.js';
+import { notFound, errorHandler } from './middleware/errorHandler.js';
+import userRoutes from './routes/userRoutes.js';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-
+// check connection to the db
 app.get('/health', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
@@ -19,6 +21,16 @@ app.get('/health', async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
+// mount APIs
+app.use('/api/v1/users', userRoutes);
+
+
+
+//handle requests to non-existing routes
+app.use(notFound)
+app.use(errorHandler)
+
+//start server ensuring connection to the db
 const startServer = async () => {
   try {
     await pool.query('SELECT 1');

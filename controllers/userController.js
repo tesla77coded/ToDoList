@@ -26,6 +26,7 @@ export const createUser = async (req, res) => {
     [username, email, hashed, isFirstUser]
   );
 
+
   const newUser = result.rows[0];
   const token = generateToken(newUser);
 
@@ -130,7 +131,7 @@ export const updateUser = async (req, res) => {
   });
 };
 
-export const updatedUserByAdmin = async (req, res) => {
+export const updateUserByAdmin = async (req, res) => {
   const { username, email, isAdmin } = req.body;
   const { id } = req.params;
 
