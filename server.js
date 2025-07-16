@@ -3,8 +3,10 @@ import express from 'express';
 import pool from './config/db.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import userRoutes from './routes/userRoutes.js';
+import taskRoutes from './routes/taskRouter.js';
 
 dotenv.config();
+console.log('JWT_SECRET:', process.env.JWT_SECRET);
 
 const app = express();
 app.use(express.json());
@@ -23,7 +25,7 @@ const PORT = process.env.PORT || 5000;
 
 // mount APIs
 app.use('/api/v1/users', userRoutes);
-
+app.use('/api/v1/tasks', taskRoutes)
 
 
 //handle requests to non-existing routes

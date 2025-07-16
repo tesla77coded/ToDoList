@@ -1,6 +1,10 @@
+import redis from '../utils/redisClient.js';
 import db from '../config/db.js';
 import { uploadFileToSupabase } from '../utils/uploadToSupabase.js';
-import redis from '../utils/redisClient.js';
+import { buildPaginatedTaskQuery } from '../utils/queryBuilders.js';
+import { logNotification } from '../utils/notify.js';
+import { sendEmail } from '../utils/sendEmail.js';
+
 
 export const createTask = async (req, res) => {
 
@@ -34,7 +38,7 @@ export const createTask = async (req, res) => {
     }
 
     const result = await db.query(
-      `INSERT INTO tasks (user_id, title, description, imageUrl, audioUrl) VALUES($1, $2, $3, $4, $5) RETURNING *`,
+      `INSERT INTO tasks (user_id, title, description, image_url, audio_url) VALUES($1, $2, $3, $4, $5) RETURNING *`,
       [req.user.id, title, description, imageUrl, audioUrl]
     );
 
@@ -53,46 +57,73 @@ export const createTask = async (req, res) => {
 
 export const getTasksByUser = async (req, res) => {
 
-  const { after } = req.query;
-  const limit = parseInt(req.query.limit) || 5;
+  const { after, limit = 5, sort = 'created' } = req.query;
 
-  const cursor = after || 'initial';
-  const redisKey = `tasks:user:${req.user.id}:after:${cursor}:limit:${limit}`;
+  const { query, values } = buildPaginatedTaskQuery({
+    userId: req.user.id,
+    after,
+    sort,
+    limit: parseInt(limit),
+  });
 
   try {
-    const cached = await redis.get(redisKey);
-    if (cached) return res.status(200).json(JSON.parse(cached));
-
-    const baseQuery = `SELECT * FROM tasks WHERE user_id = $1 
-      ${after ? 'AND created_at < $2' : ''} ORDER BY created_at DESC LIMIT $${after ? 3 : 2}`;
-
-    const params = after ? [req.user.id, after, limit] : [req.user.id, limit];
-
-    const result = await db.query(baseQuery, params);
+    const result = await db.query(query, values);
     const tasks = result.rows;
 
     const countResult = await db.query(
-      `SELECT COUNT(*) FROM tasks WHERE user_id = $1`, [req.user.id]
+      `SELECT COUNT(*) FROM tasks WHERE user_id = $1`,
+      [req.user.id]
     );
     const totalTasks = parseInt(countResult.rows[0].count);
 
-    const nextCursor = tasks.length > 0 ? tasks[tasks.length - 1].created_at : null;
+    const nextCursor = tasks.length > 0
+      ? sort === 'title'
+        ? tasks[tasks.length - 1].title
+        : tasks[tasks.length - 1].created_at
+      : null;
 
-    const response = {
-      tasks,
-      nextCursor,
-      totalTasks,
-    };
-
-    await redis.set(redisKey, JSON.stringify(response), { EX: 300 });
-
-    return res.status(200).json(response);
+    res.status(200).json({ tasks, nextCursor, totalTasks });
 
   } catch (err) {
-    console.log(err);
-    res.status(500);
-    throw new Error('Failed to fetch tasks.');
+    console.error(errror);
+    res.status(500).json({ message: 'Failed to fetch tasks.' });
+  };
+};
+
+export const searchTaskByUser = async (req, res) => {
+
+  const { query: search, after, limit = 5, sort = 'created' } = req.query;
+
+  if (!search || !search.trim()) {
+    return res.status(400).json({ message: 'Search query is required.' });
   }
+
+  const { query, values } = buildPaginatedTaskQuery(
+    {
+      userId: req.user.id,
+      search,
+      after,
+      sort,
+      limit: parseInt(limit),
+    }
+  );
+
+  try {
+    const result = await db.query(query, values);
+    const tasks = result.rows;
+
+    const nextCursor = tasks.length > 0
+      ? sort === 'title'
+        ? tasks[tasks.length - 1].title
+        : tasks[tasks.length - 1].created_at
+      : null;
+
+    res.status(200).json({ tasks, nextCursor });
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: 'Search failed.' });
+  };
 };
 
 
@@ -112,7 +143,6 @@ export const updateTaskByUser = async (req, res) => {
     throw new Error('Task not found.');
   }
 
-
   const updated = await db.query(
     `UPDATE tasks SET title = $1, description = $2, is_completed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING * `,
     [
@@ -126,11 +156,13 @@ export const updateTaskByUser = async (req, res) => {
 
   // invalidate user's paginated cache 
   const userKeys = await redis.keys(`tasks:user:${req.user.id}:after*`);
-  if(userKeys.length > 0) {
-   await redis.del(userKeys);
+  if (userKeys.length > 0) {
+    await redis.del(userKeys);
   };
 
   res.status(200).json(updatedTask);
+
+
 };
 
 
@@ -156,53 +188,36 @@ export const deleteTaskByUser = async (req, res) => {
   res.status(200).json({ message: `Task ${id} deleted.` });
 };
 
+
 export const getAllTasksByAdmin = async (req, res) => {
+  const { after, limit = 5, sort = 'created' } = req.query;
 
-  const { after } = req.query;
-  const limit = parseInt(req.query.limit) || 5;
-
-  const cursor = after || 'initial';
-  const redisKey = `admin:tasks:after:${cursor}:limit:{limit}`;
+  const { query, values } = buildPaginatedTaskQuery({
+    after,
+    sort,
+    limit: parseInt(limit),
+    isAdmin: true,
+  });
 
   try {
-    const cached = await redis.get(redisKey);
-    if (cached) return res.status(200).json(JSON.parse(cached));
-
-    const baseQuery = `
-      SELECT * FROM tasks 
-      ${after ? 'WHERE created_at < $1' : ''}
-      ORDER BY created_at DESC
-      LIMIT $${after ? 2 : 1}`;
-
-    const queryParams = after ? [after, limit] : [limit];
-
-    const result = await db.query(baseQuery, queryParams);
+    const result = await db.query(query, values);
     const tasks = result.rows;
 
-    const countResult = await db.query(
-      `SELECT COUNT(*) FROM tasks`
-    );
+    const countResult = await db.query(`SELECT COUNT(*) FROM tasks`);
     const totalTasks = parseInt(countResult.rows[0].count);
 
+    const nextCursor = tasks.length > 0
+      ? sort === 'title'
+        ? tasks[tasks.length - 1].title
+        : tasks[tasks.length - 1].created_at
+      : null;
 
-    const nextCursor = tasks.length > 0 ? tasks[tasks.length - 1].created_at : null;
+    res.status(200).json({ tasks, nextCursor, totalTasks });
 
-    const response = {
-      tasks,
-      nextCursor,
-      totalTasks,
-    };
-
-    await redis.set(redisKey, JSON.stringify(response), { EX: 300 });
-    res.status(200).json(response);
-
-  } catch (err) {
-
-    console.log(err);
-    res.status(500);
-    throw new Error('Failed to fetch tasks.');
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: 'Failed to fetch tasks.' });
   };
-
 };
 
 
@@ -211,9 +226,8 @@ export const deleteTaskByAdmin = async (req, res) => {
 
   try {
     const result = await db.query(
-      `SELECT id from tasks WHERE id = $1`, [id]
+      `SELECT id, user_id FROM tasks WHERE id = $1`, [id]
     );
-
     const task = result.rows[0];
 
     if (!task) {
@@ -221,21 +235,29 @@ export const deleteTaskByAdmin = async (req, res) => {
       throw new Error('Task not found.');
     }
 
-    await db.query(
-      `DELETE from tasks WHERE id = $1`, [id]
-    );
+    await db.query(`DELETE FROM tasks WHERE id = $1`, [id]);
 
-    //invalidate user cached pages
-    const userKeys = await redis.keys(`tasks:user:${task.user._id}:after:*`);
-    if (userKeys.length > 0) {
-      await redis.del(userKeys);
-    };
+    await logNotification(task.user_id, `An admin has deleted one of your tasks: (Task ID: ${id})`);
 
-    //invalidate admin cached pages
+    //  Invalidate Redis cache
+    const userKeys = await redis.keys(`tasks:user:${task.user_id}:after:*`);
+    if (userKeys.length > 0) await redis.del(userKeys);
+
     const adminKeys = await redis.keys(`admin:tasks:after:*`);
-    if (adminKeys.length > 0) {
-      await redis.del(adminKeys);
-    };
+    if (adminKeys.length > 0) await redis.del(adminKeys);
+
+    const emailRes = await db.query(
+      'SELECT email FROM users WHERE id = $1', [task.user_id]
+    );
+    const userEmail = emailRes.rows[0]?.email;
+
+    if (userEmail) {
+      await sendEmail(
+        userEmail,
+        'Task deleted by admin.',
+        `Hello,\n\nOne of your tasks (Task ID: ${id}) has been deleted by an admin.`
+      );
+    }
 
     res.status(200).json({ message: `Task ${id} deleted successfully.` });
 

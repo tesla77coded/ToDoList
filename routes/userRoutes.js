@@ -1,22 +1,27 @@
 import express from 'express';
 import { protect, admin } from '../middleware/authMiddleware.js';
-import { createUser, loginUser, getUser, getAllUsers, updateUser, updateUserByAdmin, deleteUserByAdmin } from '../controllers/userController.js';
-
+import { createUser, confirmEmail, forgotPassword, resetPassword, loginUser, getUser, getUserNotifications, getAllUsers, updateUser, updateUserByAdmin, deleteUserByAdmin } from '../controllers/userController.js';
 
 const router = express.Router();
 
 router.route('/')
   .post(createUser)
-  .get(protect, admin, getAllUsers)
 
-router.post('/login', loginUser)
+router.get('/confirm-email', confirmEmail);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
+router.get('/user-notifications', protect, getUserNotifications);
+router.put('/update-profile', protect, updateUser)
+
+router.post('/login', loginUser);
 
 router.route('/profile')
   .get(protect, getUser)
-  .put(protect, updateUser)
+
+router.get('/allUserProfiles', protect, admin, getAllUsers)
 
 router.route('/:id')
-  .get(updateUserByAdmin)
-  .delete(deleteUserByAdmin)
+  .get(protect, admin, updateUserByAdmin)
+  .delete(protect, admin, deleteUserByAdmin)
 
 export default router;

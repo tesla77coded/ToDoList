@@ -1,7 +1,12 @@
 import bcrypt from "bcryptjs";
-import generateToken from "../utils/generateToken.js";
+import jwt from 'jsonwebtoken'
+import { generateToken, generateEmailToken, generateResetToken } from "../utils/generateToken.js";
+import db from '../config/db.js'
+import { logNotification } from "../utils/notify.js";
+import { sendEmail } from "../utils/sendEmail.js";
 
 export const createUser = async (req, res) => {
+
   const { username, email, password } = req.body;
 
   const userExists = await db.query(
@@ -30,6 +35,17 @@ export const createUser = async (req, res) => {
   const newUser = result.rows[0];
   const token = generateToken(newUser);
 
+
+  const emailToken = generateEmailToken(newUser.id);
+  const confirmUrl = `${process.env.FRONTEND_URL}/confirm-email?token=${emailToken}`;
+  console.log('Email confirmation token:', emailToken);
+
+  await sendEmail(
+    newUser.email,
+    'Confirm your email',
+    `Hi ${newUser.username},\n\nPlease confirm your email by clicking the link below: \n\n${confirmUrl}`
+  );
+
   res.status(201).json({
     id: newUser.id,
     user: newUser.username,
@@ -40,7 +56,89 @@ export const createUser = async (req, res) => {
 };
 
 
+export const confirmEmail = async (req, res) => {
+  const { token } = req.query;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('✅ Decoded Token:', decoded); // DEBUG LOG
+
+    const userId = decoded.userId;
+    console.log('🔍 Extracted userId:', userId); // DEBUG LOG
+
+    const userRes = await db.query('SELECT verified FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (user.verified) {
+      return res.status(400).json({ message: 'Email already verified.' });
+    }
+
+    await db.query('UPDATE users SET verified = true WHERE id = $1', [userId]);
+
+    return res.status(200).json({ message: 'Email verified successfully.' });
+
+  } catch (err) {
+    console.error('❌ JWT verification failed:', err.message); // DEBUG LOG
+    return res.status(400).json({ message: 'Invalid or expired token.' });
+  }
+}
+
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  const result = await db.query(
+    `SELECT id, username FROM users WHERE email = $1`, [email]
+  );
+  const user = result.rows[0];
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not registered.');
+  }
+
+  const resetToken = generateResetToken(user.id);
+  console.log(`The password reset token for ${user.id} is: ${resetToken}`);
+  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+  await sendEmail(
+    email,
+    'Reset the password.',
+    `Hi ${user.username},\n\nReset your password by clicking the link below:\n\n${resetLink}`
+  );
+
+  res.status(201).json({ message: 'Password reset link sent.' });
+
+}
+
+
+export const resetPassword = async (req, res) => {
+  const { token } = req.query;
+  const { newPassword } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.userId;
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await db.query(`UPDATE users SET password = $1 WHERE id = $2`, [hashed, userId]);
+    res.status(200).json({ message: 'Password reset successfully.' });
+
+  } catch (err) {
+    return res.status(400).json({ message: 'Invalid or expired token.' });
+  };
+};
+
+
 export const loginUser = async (req, res) => {
+  if (!req.body) {
+    return res.status(400).json({ message: "Request body missing." });
+  }
+
   const { identifier, password } = req.body;
 
   const result = await db.query(
@@ -48,6 +146,10 @@ export const loginUser = async (req, res) => {
     [identifier]
   );
   const user = result.rows[0];
+
+  if (!user.verified) {
+    return res.status(401).json({ message: 'Please verify your email first.' });
+  }
 
   if (user && await (bcrypt.compare(password, user.password))) {
     const token = generateToken(user);
@@ -67,21 +169,15 @@ export const loginUser = async (req, res) => {
 
 export const getUser = async (req, res) => {
 
-  const { identifier } = req.body;
+  const user = req.user
 
-  const result = await db.query(
-    'SELECT id, username, email, is_admin FROM users WHERE email = $1 or username = $1',
-    [identifier]
-  );
+  res.status(200).json({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    isAdmin: user.isAdmin,
+  });
 
-  const user = result.rows[0];
-  if (!user) {
-    return res.status(404).json('User does not exists.');
-  } else {
-    res.status(200).json({
-      user
-    });
-  }
 };
 
 
@@ -98,8 +194,7 @@ export const updateUser = async (req, res) => {
   const { username, email, password } = req.body;
 
   const result = await db.query(
-    'SELECT username, email, password FROM users WHERE id = $1',
-    [userId]
+    `SELECT username, email, password FROM users WHERE id = $1`, [userId]
   );
 
   const current = result.rows[0];
@@ -107,20 +202,42 @@ export const updateUser = async (req, res) => {
   if (!current) {
     res.status(404);
     throw new Error('User not found.');
-  };
+  }
 
   const newUsername = username || current.username;
   const newEmail = email || current.email;
-  const newPassword = password ? await bcrypt.hash(password, 10) : current.password;
 
-  const updated = await db.query(
-    'UPDATE users SET username = $1, email = $2, password =$3 WHERE id = $4 RETURNING id, username, email, id_admin',
-    [newUsername, newEmail, newPassword, userId]
-  );
+  const passwordChanged = !!password;
+  const emailChanged = email && email !== current.email;
+
+  const newPassword = passwordChanged
+    ? await bcrypt.hash(password, 10)
+    : current.password;
+
+  const updated = await db.query(`
+    UPDATE users SET username = $1, email = $2, password = $3 WHERE id = $4 RETURNING id, username, email, is_admin
+  `, [newUsername, newEmail, newPassword, userId])
 
   const updatedUser = updated.rows[0];
-
   const token = generateToken(updatedUser);
+
+  // ✅ Notify user if password was changed
+  if (passwordChanged) {
+    await sendEmail(
+      newEmail,
+      'Your password has changed.',
+      `Hi ${newUsername},\n\nThis is a confirmation that your password was recently changed.`
+    );
+  }
+
+  // Notify user if email was changed
+  if (emailChanged) {
+    await sendEmail(
+      newEmail,
+      'Your email was changed.',
+      `Hi ${newUsername},\n\nThis is a confirmation that your email was recently changed.`
+    );
+  }
 
   res.status(200).json({
     id: updatedUser.id,
@@ -129,9 +246,28 @@ export const updateUser = async (req, res) => {
     isAdmin: updatedUser.is_admin,
     token,
   });
+
 };
 
+
+export const getUserNotifications = async (req, res) => {
+  try {
+    const result = await db.query(
+      `
+     SELECT * FROM notifications WHERE id = $1 ORDER BY created_at DESC 
+    `, [req.user.id]);
+
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: 'Failed to fetch notifications.' });
+  }
+}
+
+
 export const updateUserByAdmin = async (req, res) => {
+
   const { username, email, isAdmin } = req.body;
   const { id } = req.params;
 
@@ -157,7 +293,9 @@ export const updateUserByAdmin = async (req, res) => {
   );
 
   const updatedUser = result.rows[0];
+  await logNotification(id, 'Your profile was updated by an admin.');
   const token = generateToken(updatedUser);
+
 
   res.status(201).json({
     id: updatedUser.id,
@@ -166,6 +304,13 @@ export const updateUserByAdmin = async (req, res) => {
     isAdmin: updatedUser.is_admin,
     token,
   });
+
+  await sendEmail(
+    updatedUser.email,
+    'Your account was updated by admin.',
+    `Hi ${updatedUser.username}, \n\n An admin has updated your account information.If this was unexpected contact support.`
+  )
+
 };
 
 

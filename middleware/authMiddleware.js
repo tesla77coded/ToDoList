@@ -10,10 +10,11 @@ const protect = async (req, res, next) => {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const userId = decoded.user?.id;
 
       const result = await db.query(
         'SELECT id, username, email, is_admin FROM users WHERE id = $1',
-        [decoded.id]
+        [userId]
       );
 
       const user = result.rows[0];
@@ -29,19 +30,15 @@ const protect = async (req, res, next) => {
         email: user.email,
         isAdmin: user.is_admin,
       };
-      next();
+      return next();
 
     } catch (err) {
-      res.status(401);
-      throw new Error("Invalid or expired token");
-    };
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
   }
 
-  if (!token) {
-    res.status(401);
-    return res.json({ message: 'Not authorized, no token found.' });
-  }
-}
+  return res.status(401).json({ message: 'Not authorized, no token found.' });
+};
 
 const admin = (req, res, next) => {
   if (req.user && req.user.isAdmin) {
