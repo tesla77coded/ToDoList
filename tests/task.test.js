@@ -318,7 +318,7 @@ test('❌ Should return 401 without token', async () => {
 test('❌ Non-admin user should not access admin task list', async () => {
   const res = await request(app)
     .get('/api/v1/tasks/admin/getalltasks')
-    .set('Authorization', `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoxOTUsInVzZXJuYW1lIjoiZHVtbXlVc2VyNSIsImVtYWlsIjoiZHVtbXlVc2VyNUBnbWFpbC5jb20iLCJwYXNzd29yZCI6IiQyYiQxMCRGSXNMZVhMbmE5a2JqQlVXdGo5Tkx1UmxuWlkvSHRYMXdsQ1JsbGxUL1g2V1BCVjdBMHVNeSIsImlzX2FkbWluIjpmYWxzZSwiY3JlYXRlZF9hdCI6IjIwMjUtMDctMjFUMDY6MTM6MDAuMTk1WiIsInVwZGF0ZWRfYXQiOiIyMDI1LTA3LTIxVDA2OjEzOjAwLjE5NVoiLCJ2ZXJpZmllZCI6dHJ1ZX0sImlhdCI6MTc1MzA5ODM3MywiZXhwIjoxNzYwODc0MzczfQ.-nC5CyvNK6rJxF58857vtHURlBJTFvbeyuSH-VBKhcY`); // not admin
+    .set('Authorization', `Bearer {Use Dummy Token}`); // not admin
 
   expect(res.statusCode).toBe(403);
   expect(res.body.message.toLowerCase()).toMatch(/admin/);
