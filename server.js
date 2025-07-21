@@ -24,8 +24,8 @@ if (process.env.NODE_ENV !== 'test') {
     try {
       await pool.query('SELECT 1');
       console.log('✅ Connected to Supabase PostgreSQL');
-      app.listen(PORT, () => {
-        console.log(`🚀 Server is running on http://localhost:${PORT}`);
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
       });
     } catch (err) {
       console.error('❌ Failed to connect to DB:', err);
