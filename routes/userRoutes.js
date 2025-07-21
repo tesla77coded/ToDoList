@@ -18,10 +18,11 @@ router.post('/login', loginUser);
 router.route('/profile')
   .get(protect, getUser)
 
+
 router.get('/allUserProfiles', protect, admin, getAllUsers)
 
 router.route('/:id')
-  .get(protect, admin, updateUserByAdmin)
+  .put(protect, admin, updateUserByAdmin)
   .delete(protect, admin, deleteUserByAdmin)
 
 export default router;
