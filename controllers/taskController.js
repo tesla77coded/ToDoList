@@ -161,8 +161,6 @@ export const updateTaskByUser = async (req, res) => {
   };
 
   res.status(200).json(updatedTask);
-
-
 };
 
 
