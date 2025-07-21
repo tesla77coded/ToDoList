@@ -199,7 +199,6 @@ Live API (example): [https://todolist-backend-7j07.onrender.com](https://todolis
 
 ## 👨‍💻 Author
 
-**Jaydeep Kadam**
-GitHub: [@tesla77coded](https://github.com/tesla77coded)
+**Tesla77**
 
 If you like this project, feel free to ⭐ the repo and share your feedback!
