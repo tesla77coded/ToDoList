@@ -31,6 +31,7 @@ export const createUser = async (req, res) => {
     [username, email, hashed, isFirstUser]
   );
 
+  console.log('User created:', result.rows[0]);
 
   const newUser = result.rows[0];
   const token = generateToken(newUser);
@@ -47,11 +48,15 @@ export const createUser = async (req, res) => {
   );
 
   res.status(201).json({
-    id: newUser.id,
-    user: newUser.username,
-    email: newUser.email,
-    isadmin: newUser.is_admin,
+    message: 'User registered successfully.',
+    user: {
+      id: newUser.id,
+      user: newUser.username,
+      email: newUser.email,
+      isadmin: newUser.is_admin,
+    },
     token,
+    ...(process.env.NODE_ENV === 'test' && { confirmationToken: emailToken }) // 🔐 only include token in test env
   });
 };
 
@@ -93,6 +98,7 @@ export const forgotPassword = async (req, res) => {
   const result = await db.query(
     `SELECT id, username FROM users WHERE email = $1`, [email]
   );
+
   const user = result.rows[0];
 
   if (!user) {
@@ -110,7 +116,16 @@ export const forgotPassword = async (req, res) => {
     `Hi ${user.username},\n\nReset your password by clicking the link below:\n\n${resetLink}`
   );
 
-  res.status(201).json({ message: 'Password reset link sent.' });
+
+  // 👇 Include the token only when testing
+  if (process.env.NODE_ENV === 'test') {
+    return res.status(200).json({
+      message: 'Password reset link sent.',
+      resetToken, // 🧪 Add this for test usage
+    });
+  }
+
+  res.status(200).json({ message: 'Password reset link sent.' });
 
 }
 
@@ -145,13 +160,20 @@ export const loginUser = async (req, res) => {
     'SELECT * FROM users WHERE username = $1 OR email = $1',
     [identifier]
   );
+
   const user = result.rows[0];
+
+  if (!user) {
+    return res.status(404).json({ message: 'User not found. Please register.' });
+  }
+
+  console.log('User verified status:', user.verified);
 
   if (!user.verified) {
     return res.status(401).json({ message: 'Please verify your email first.' });
   }
 
-  if (user && await (bcrypt.compare(password, user.password))) {
+  if (user && await bcrypt.compare(password, user.password)) {
     const token = generateToken(user);
     console.log(`${identifier} logged in successfully.`);
     res.status(200).json({
@@ -160,10 +182,9 @@ export const loginUser = async (req, res) => {
     });
   } else {
     res.status(401).json({
-      message: 'Invalid credentaials. Try again.'
+      message: 'Invalid credentials. Try again.'
     });
-
-  };
+  }
 };
 
 
@@ -182,10 +203,15 @@ export const getUser = async (req, res) => {
 
 
 export const getAllUsers = async (req, res) => {
-  const result = await db.query(
-    'SELECT id, username, email, is_admin FROM users',
-  );
-  res.status(200).json(result.rows);
+  console.log('🔥 getAllUsers called by:', req.user); // Add this
+
+  try {
+    const result = await db.query('SELECT id, username, email, is_admin FROM users ORDER BY id');
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('❌ Error in getAllUsers:', err); // Add this
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 
@@ -271,6 +297,8 @@ export const updateUserByAdmin = async (req, res) => {
   const { username, email, isAdmin } = req.body;
   const { id } = req.params;
 
+  console.log('🛠️ Admin updating user:', req.params.id);
+
   const existing = await db.query(
     'SELECT username, email, is_admin, password FROM users WHERE id = $1',
     [id]
@@ -296,20 +324,19 @@ export const updateUserByAdmin = async (req, res) => {
   await logNotification(id, 'Your profile was updated by an admin.');
   const token = generateToken(updatedUser);
 
+  await sendEmail(
+    updatedUser.email,
+    'Your account was updated by admin.',
+    `Hi ${updatedUser.username}, \n\n An admin has updated your account information.If this was unexpected contact support.`
+  )
 
-  res.status(201).json({
+  res.status(200).json({
     id: updatedUser.id,
     username: updatedUser.username,
     email: updatedUser.email,
     isAdmin: updatedUser.is_admin,
     token,
   });
-
-  await sendEmail(
-    updatedUser.email,
-    'Your account was updated by admin.',
-    `Hi ${updatedUser.username}, \n\n An admin has updated your account information.If this was unexpected contact support.`
-  )
 
 };
 
