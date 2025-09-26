@@ -85,7 +85,7 @@ export const getTasksByUser = async (req, res) => {
     res.status(200).json({ tasks, nextCursor, totalTasks });
 
   } catch (err) {
-    console.error(errror);
+    console.error(error);
     res.status(500).json({ message: 'Failed to fetch tasks.' });
   };
 };
@@ -180,7 +180,7 @@ export const deleteTaskByUser = async (req, res) => {
   }
 
   // clearing the task cache if there is any
-  await redis.del(`tasks: user:${req.user.id} `);
+  await redis.del(`tasks: user:${req.user.id}`);
 
   await db.query(`DELETE FROM tasks WHERE id = $1`, [id]);
   res.status(200).json({ message: `Task ${id} deleted.` });
