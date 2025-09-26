@@ -186,6 +186,15 @@ Live API (example): [https://todolist-backend-7j07.onrender.com](https://todolis
 | DELETE | `/api/v1/tasks/admin/delete-task/:id`   | Delete any task (admin only)        |
 
 
+## 📚 API Documentation
+
+Interactive Swagger UI is available when the server is running:
+
+- **Swagger UI:** [http://localhost:8080/docs](http://localhost:8080/docs) (default local path)
+- After deployment replace `localhost:8080` with your live host.
+
+Click **Authorize** in the top-right and paste a valid JWT to explore protected routes.
+
 ---
 
 ## 🙌 Acknowledgements
