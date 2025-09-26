@@ -2,6 +2,9 @@
 .env
 .env.*.local
 
+package-lock.json
+
+
 # Node
 node_modules/
 npm-debug.log*
